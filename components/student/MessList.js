@@ -1,6 +1,7 @@
 "use client";
+import AddressDisplay from "../common/AddressDisplay";
 
-const MessList = ({ messes, onSelectMess, selectedMess }) => {
+export default function MessList({ messes, onSelectMess, selectedMess }) {
   return (
     <div className="bg-white rounded-lg shadow-sm border">
       <div className="p-4 border-b">
@@ -24,11 +25,23 @@ const MessList = ({ messes, onSelectMess, selectedMess }) => {
             onClick={() => onSelectMess(mess)}
           >
             <div className="flex justify-between items-start">
-              <div>
+              <div className="flex-1">
                 <h3 className="font-medium text-gray-900">{mess.name}</h3>
                 <p className="text-sm text-gray-600 mt-1 line-clamp-2">
                   {mess.description || "No description available"}
                 </p>
+
+                {/* Mess Address */}
+                {mess.address && (
+                  <div className="mt-2">
+                    <AddressDisplay
+                      address={mess.address}
+                      title="Location"
+                      className="text-xs"
+                    />
+                  </div>
+                )}
+
                 {mess.rating && (
                   <div className="flex items-center mt-2">
                     <span className="text-yellow-400">⭐</span>
@@ -68,6 +81,4 @@ const MessList = ({ messes, onSelectMess, selectedMess }) => {
       </div>
     </div>
   );
-};
-
-export default MessList;
+}

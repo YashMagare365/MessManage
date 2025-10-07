@@ -5,33 +5,17 @@ import { useRouter } from "next/navigation";
 import MessList from "../../../components/student/MessList";
 import MenuCard from "../../../components/student/MenuCard";
 import OrderCart from "../../../components/student/OrderCart";
+import AddressForm from "../../../components/common/AddressForm";
+import AddressDisplay from "../../../components/common/AddressDisplay";
+import LogoutButton from "../../../components/common/LogoutButton";
 import dynamic from "next/dynamic";
 import { getMesses, createOrder } from "../../../lib/firestore";
+import { doc, updateDoc } from "firebase/firestore";
+import { db } from "../../../lib/firebase";
 
-// Use dynamic import for LogoutButton with error handling
-const LogoutButton = dynamic(
+const LogoutButtonDynamic = dynamic(
   () => import("../../../components/common/LogoutButton"),
-  {
-    ssr: false,
-    loading: () => (
-      <button className="flex items-center space-x-2 text-red-600 opacity-50">
-        <svg
-          className="h-4 w-4"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-          />
-        </svg>
-        <span>Logout</span>
-      </button>
-    ),
-  }
+  { ssr: false }
 );
 
 export default function StudentDashboard() {
@@ -41,6 +25,7 @@ export default function StudentDashboard() {
   const [selectedMess, setSelectedMess] = useState(null);
   const [cart, setCart] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showAddressForm, setShowAddressForm] = useState(false);
 
   useEffect(() => {
     if (currentUser && currentUser.userData?.userType !== "student") {
@@ -87,13 +72,34 @@ export default function StudentDashboard() {
       studentId: currentUser.uid,
       studentName:
         currentUser.displayName || currentUser.userData?.name || "Unknown",
+      studentEmail: currentUser.email,
       createdAt: new Date(),
     };
 
     try {
       await createOrder(completeOrderData);
+      // Clear cart after successful order placement
+      setCart([]);
     } catch (error) {
       throw error;
+    }
+  };
+
+  const updateStudentAddress = async (addressData) => {
+    try {
+      await updateDoc(doc(db, "users", currentUser.uid), {
+        address: addressData,
+        updatedAt: new Date(),
+      });
+      // Update local user data
+      if (currentUser.userData) {
+        currentUser.userData.address = addressData;
+      }
+      setShowAddressForm(false);
+      alert("Address updated successfully!");
+    } catch (error) {
+      console.error("Error updating address:", error);
+      alert("Error updating address: " + error.message);
     }
   };
 
@@ -123,10 +129,12 @@ export default function StudentDashboard() {
               </p>
             </div>
             <div className="flex items-center space-x-4">
-              <span className="text-gray-700">
-                {currentUser?.displayName || currentUser?.userData?.name}
-              </span>
-              <LogoutButton />
+              <AddressDisplay
+                address={currentUser?.userData?.address}
+                title="My Address"
+                className="text-right"
+              />
+              <LogoutButtonDynamic />
             </div>
           </div>
         </div>
@@ -146,6 +154,25 @@ export default function StudentDashboard() {
             <p className="text-gray-600 mt-2">
               Order from multiple messes in one go
             </p>
+
+            {/* Address Management */}
+            <div className="mt-4">
+              {!currentUser?.userData?.address?.street ? (
+                <button
+                  onClick={() => setShowAddressForm(true)}
+                  className="text-indigo-600 hover:text-indigo-700 text-sm font-medium"
+                >
+                  + Add your delivery address
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShowAddressForm(true)}
+                  className="text-gray-600 hover:text-gray-700 text-sm"
+                >
+                  Update address
+                </button>
+              )}
+            </div>
           </div>
 
           {cart.length > 0 && (
@@ -154,6 +181,20 @@ export default function StudentDashboard() {
             </div>
           )}
         </div>
+
+        {/* Address Form Modal */}
+        {showAddressForm && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg max-w-md w-full">
+              <AddressForm
+                initialAddress={currentUser?.userData?.address || {}}
+                onSave={updateStudentAddress}
+                onCancel={() => setShowAddressForm(false)}
+                title="Update Your Address"
+              />
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1">
@@ -173,6 +214,7 @@ export default function StudentDashboard() {
                 cart={cart}
                 onPlaceOrder={placeOrder}
                 selectedMess={selectedMess}
+                studentAddress={currentUser?.userData?.address}
               />
             </div>
           </div>

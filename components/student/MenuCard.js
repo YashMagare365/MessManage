@@ -59,8 +59,8 @@ export default function MenuCard({ mess, onAddToCart }) {
                 key={index}
                 className="flex items-center p-4 border rounded-lg hover:bg-gray-50 transition-colors"
               >
-                {/* Item Image */}
-                <div className="flex-shrink-0 w-16 h-16 mr-4">
+                {/* Item Image from Cloudinary */}
+                <div className="flex-shrink-0 w-20 h-20 mr-4">
                   {item.image ? (
                     <img
                       src={item.image}
@@ -70,7 +70,7 @@ export default function MenuCard({ mess, onAddToCart }) {
                   ) : (
                     <div className="w-full h-full bg-gray-200 rounded-lg flex items-center justify-center text-gray-400">
                       <svg
-                        className="w-6 h-6"
+                        className="w-8 h-8"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"

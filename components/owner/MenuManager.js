@@ -1,14 +1,17 @@
 "use client";
 import { useState, useEffect } from "react";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { doc, updateDoc, getDoc } from "firebase/firestore";
-import { storage, db } from "../../lib/firebase";
+import { doc, setDoc, updateDoc, getDoc } from "firebase/firestore";
+import { db } from "../../lib/firebase";
+import { createMessDocument } from "../../lib/auth";
+import { uploadImageToCloudinary } from "../../lib/cloudinary-upload";
 
 export default function MenuManager({ messId }) {
   const [menuItems, setMenuItems] = useState([]);
   const [isAdding, setIsAdding] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [messExists, setMessExists] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -17,6 +20,7 @@ export default function MenuManager({ messId }) {
     isVeg: true,
     isAvailable: true,
     image: null,
+    imageFile: null,
   });
 
   useEffect(() => {
@@ -25,33 +29,48 @@ export default function MenuManager({ messId }) {
 
   const loadMenuItems = async () => {
     try {
+      setLoading(true);
       const messDoc = await getDoc(doc(db, "messes", messId));
+
       if (messDoc.exists()) {
         const messData = messDoc.data();
         setMenuItems(messData.menu || []);
+        setMessExists(true);
+        console.log("Mess document loaded successfully");
+      } else {
+        // Mess document doesn't exist, create it
+        console.log("Mess document not found, creating now...");
+        await createMessDocument(messId, "Your Mess");
+        setMenuItems([]);
+        setMessExists(true);
+        console.log("New mess document created");
       }
     } catch (error) {
       console.error("Error loading menu items:", error);
+      alert("Error loading menu: " + error.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleImageUpload = async (file) => {
-    if (!file) return null;
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (!file.type.startsWith("image/")) {
+        alert("Please select an image file (JPEG, PNG, WebP, etc.)");
+        return;
+      }
 
-    try {
-      setUploadingImage(true);
-      const storageRef = ref(
-        storage,
-        `menu-images/${messId}/${Date.now()}-${file.name}`
-      );
-      const snapshot = await uploadBytes(storageRef, file);
-      const downloadURL = await getDownloadURL(snapshot.ref);
-      return downloadURL;
-    } catch (error) {
-      console.error("Error uploading image:", error);
-      throw error;
-    } finally {
-      setUploadingImage(false);
+      if (file.size > 5 * 1024 * 1024) {
+        alert("Please select an image smaller than 5MB");
+        return;
+      }
+
+      setFormData({
+        ...formData,
+        imageFile: file,
+        image: URL.createObjectURL(file),
+      });
     }
   };
 
@@ -61,9 +80,21 @@ export default function MenuManager({ messId }) {
     try {
       let imageUrl = formData.image;
 
-      // If a new image file is selected, upload it
-      if (formData.image instanceof File) {
-        imageUrl = await handleImageUpload(formData.image);
+      // If a new image file is selected, upload to Cloudinary
+      if (formData.imageFile) {
+        setUploadingImage(true);
+        try {
+          console.log("Uploading image to Cloudinary...");
+          imageUrl = await uploadImageToCloudinary(formData.imageFile);
+          console.log("Image uploaded successfully:", imageUrl);
+        } catch (uploadError) {
+          console.error("Cloudinary upload failed:", uploadError);
+          alert(
+            "Failed to upload image. Please try again or continue without image."
+          );
+          setUploadingImage(false);
+          return;
+        }
       }
 
       const newItem = {
@@ -82,16 +113,26 @@ export default function MenuManager({ messId }) {
         ? menuItems.map((item) => (item.id === editingItem.id ? newItem : item))
         : [...menuItems, newItem];
 
+      // Ensure mess document exists before updating
+      const messDoc = await getDoc(doc(db, "messes", messId));
+      if (!messDoc.exists()) {
+        await createMessDocument(messId, "Your Mess");
+      }
+
       // Update Firestore
       await updateDoc(doc(db, "messes", messId), {
         menu: updatedMenu,
+        updatedAt: new Date(),
       });
 
       setMenuItems(updatedMenu);
       resetForm();
       alert(editingItem ? "Menu item updated!" : "Menu item added!");
     } catch (error) {
+      console.error("Error saving menu item:", error);
       alert("Error saving menu item: " + error.message);
+    } finally {
+      setUploadingImage(false);
     }
   };
 
@@ -104,6 +145,7 @@ export default function MenuManager({ messId }) {
       isVeg: true,
       isAvailable: true,
       image: null,
+      imageFile: null,
     });
     setEditingItem(null);
     setIsAdding(false);
@@ -117,7 +159,8 @@ export default function MenuManager({ messId }) {
       category: item.category,
       isVeg: item.isVeg,
       isAvailable: item.isAvailable,
-      image: item.image,
+      image: item.image, // This is the Cloudinary URL
+      imageFile: null,
     });
     setEditingItem(item);
     setIsAdding(true);
@@ -127,22 +170,33 @@ export default function MenuManager({ messId }) {
     if (confirm("Are you sure you want to delete this item?")) {
       try {
         const updatedMenu = menuItems.filter((item) => item.id !== itemId);
+
+        // Ensure mess document exists before updating
+        const messDoc = await getDoc(doc(db, "messes", messId));
+        if (!messDoc.exists()) {
+          await createMessDocument(messId, "Your Mess");
+        }
+
         await updateDoc(doc(db, "messes", messId), {
           menu: updatedMenu,
+          updatedAt: new Date(),
         });
+
         setMenuItems(updatedMenu);
         alert("Menu item deleted!");
       } catch (error) {
+        console.error("Error deleting menu item:", error);
         alert("Error deleting menu item: " + error.message);
       }
     }
   };
 
-  const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setFormData({ ...formData, image: file });
-    }
+  const removeImage = () => {
+    setFormData({
+      ...formData,
+      image: null,
+      imageFile: null,
+    });
   };
 
   const categories = [
@@ -155,6 +209,52 @@ export default function MenuManager({ messId }) {
     { value: "beverage", label: "Beverages" },
     { value: "snacks", label: "Snacks" },
   ];
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-lg shadow-sm border p-6">
+        <div className="animate-pulse">
+          <div className="h-6 bg-gray-200 rounded w-1/4 mb-4"></div>
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-20 bg-gray-200 rounded"></div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!messExists) {
+    return (
+      <div className="bg-white rounded-lg shadow-sm border p-6">
+        <div className="text-center py-8">
+          <div className="w-16 h-16 mx-auto mb-4 text-red-500">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"
+              />
+            </svg>
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            Mess Setup Required
+          </h3>
+          <p className="text-gray-600 mb-4">
+            Your mess profile needs to be set up before you can manage the menu.
+          </p>
+          <button
+            onClick={loadMenuItems}
+            className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700"
+          >
+            Set Up Mess
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white rounded-lg shadow-sm border">
@@ -235,7 +335,7 @@ export default function MenuManager({ messId }) {
               />
             </div>
 
-            {/* Image Upload */}
+            {/* Cloudinary Image Upload */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Item Image
@@ -248,25 +348,25 @@ export default function MenuManager({ messId }) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
                 {formData.image && (
-                  <div className="w-16 h-16 border rounded overflow-hidden">
-                    {formData.image instanceof File ? (
-                      <img
-                        src={URL.createObjectURL(formData.image)}
-                        alt="Preview"
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <img
-                        src={formData.image}
-                        alt="Current"
-                        className="w-full h-full object-cover"
-                      />
-                    )}
+                  <div className="relative">
+                    <img
+                      src={formData.image}
+                      alt="Preview"
+                      className="w-16 h-16 object-cover rounded border"
+                    />
+                    <button
+                      type="button"
+                      onClick={removeImage}
+                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs"
+                    >
+                      ×
+                    </button>
                   </div>
                 )}
               </div>
               <p className="text-xs text-gray-500 mt-1">
-                Upload a high-quality image of your dish (optional)
+                Upload a high-quality image of your dish (JPEG, PNG, WebP, max
+                5MB)
               </p>
             </div>
 
@@ -327,7 +427,7 @@ export default function MenuManager({ messId }) {
                 className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
               >
                 {uploadingImage
-                  ? "Uploading..."
+                  ? "Uploading Image..."
                   : editingItem
                   ? "Update Item"
                   : "Add Item"}
@@ -344,7 +444,7 @@ export default function MenuManager({ messId }) {
         </div>
       )}
 
-      {/* Menu Items List */}
+      {/* Menu Items List with Images */}
       <div className="p-6">
         <h3 className="text-lg font-medium mb-4">
           Current Menu ({menuItems.length} items)
@@ -357,7 +457,7 @@ export default function MenuManager({ messId }) {
                 key={item.id}
                 className="border rounded-lg overflow-hidden hover:shadow-md transition-shadow"
               >
-                {/* Item Image */}
+                {/* Item Image from Cloudinary */}
                 <div className="h-48 bg-gray-200 overflow-hidden">
                   {item.image ? (
                     <img
