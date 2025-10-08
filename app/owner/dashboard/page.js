@@ -5,7 +5,7 @@ import OrderCard from "../../../components/owner/OrderCard";
 import MenuManager from "../../../components/owner/MenuManager";
 import QrUpload from "../../../components/owner/QrUpload";
 import LogoutButton from "../../../components/common/LogoutButton";
-import { listenToMessOrders, updateOrderStatus } from "../../../lib/firestore";
+import { getMessOrders, updateOrderStatus } from "../../../lib/firestore";
 
 export default function OwnerDashboard() {
   const { currentUser } = useAuth();
@@ -14,50 +14,47 @@ export default function OwnerDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!currentUser) return;
-
-    // Set up real-time listener for orders
-    const unsubscribe = listenToMessOrders(currentUser.uid, (ordersData) => {
-      setOrders(ordersData);
-      setLoading(false);
-    });
-
-    // Cleanup listener on unmount
-    return () => unsubscribe();
+    if (currentUser) {
+      loadOrders();
+    }
   }, [currentUser]);
 
-  const handleStatusUpdate = async (orderId, newStatus) => {
+  const loadOrders = async () => {
     try {
-      await updateOrderStatus(orderId, newStatus);
-      // The real-time listener will automatically update the UI
+      const ordersData = await getMessOrders(currentUser.uid);
+      setOrders(ordersData);
     } catch (error) {
-      console.error("Error updating order status:", error);
-      throw error;
+      console.error("Error loading orders:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Filter orders by status for better organization
-  const activeOrders = orders.filter(
-    (order) => !["delivered", "cancelled"].includes(order.status)
-  );
-  const completedOrders = orders.filter((order) =>
-    ["delivered", "cancelled"].includes(order.status)
-  );
+  const handleStatusUpdate = async (orderId, status) => {
+    try {
+      await updateOrderStatus(orderId, status);
+      // Reload orders to get updated data
+      await loadOrders();
+      alert(`Order status updated to: ${status.replace(/_/g, " ")}`);
+    } catch (error) {
+      console.error("Error updating order status:", error);
+      alert("Error updating order status: " + error.message);
+    }
+  };
 
   if (loading) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading orders...</p>
+          <p className="mt-4 text-gray-600">Loading dashboard...</p>
         </div>
       </div>
     );
   }
 
   const tabs = [
-    { id: "orders", name: "Active Orders", count: activeOrders.length },
-    { id: "completed", name: "Order History", count: completedOrders.length },
+    { id: "orders", name: "Orders", count: orders.length },
     { id: "menu", name: "Menu" },
     { id: "qr", name: "QR Code" },
   ];
@@ -91,7 +88,7 @@ export default function OwnerDashboard() {
         <h1 className="text-3xl font-bold text-gray-900 mb-2">
           Mess Owner Dashboard
         </h1>
-        <p className="text-gray-600 mb-8">Manage orders and track deliveries</p>
+        <p className="text-gray-600 mb-8">Manage your mess operations</p>
 
         {/* Tabs */}
         <div className="border-b border-gray-200 mb-6">
@@ -119,51 +116,19 @@ export default function OwnerDashboard() {
 
         {/* Content */}
         {activeTab === "orders" && (
-          <div className="space-y-6">
-            {activeOrders.length > 0 ? (
-              activeOrders.map((order) => (
-                <OrderCard
-                  key={order.id}
-                  order={order}
-                  onStatusUpdate={handleStatusUpdate}
-                />
-              ))
-            ) : (
+          <div className="space-y-4">
+            {orders.map((index,order) => (
+              <OrderCard
+                key={index}
+                order={order}
+                onStatusUpdate={handleStatusUpdate}
+              />
+            ))}
+            {orders.length === 0 && (
               <div className="text-center py-12">
-                <div className="w-24 h-24 mx-auto mb-4 text-gray-300">
-                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={1}
-                      d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
-                    />
-                  </svg>
-                </div>
-                <p className="text-gray-500 text-lg">No active orders</p>
+                <p className="text-gray-500 text-lg">No orders yet</p>
                 <p className="text-gray-400 text-sm mt-2">
-                  New orders will appear here automatically
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === "completed" && (
-          <div className="space-y-6">
-            {completedOrders.length > 0 ? (
-              completedOrders.map((order) => (
-                <OrderCard
-                  key={order.id}
-                  order={order}
-                  onStatusUpdate={handleStatusUpdate}
-                />
-              ))
-            ) : (
-              <div className="text-center py-12">
-                <p className="text-gray-500 text-lg">No completed orders yet</p>
-                <p className="text-gray-400 text-sm mt-2">
-                  Completed and cancelled orders will appear here
+                  Orders will appear here when students place them
                 </p>
               </div>
             )}

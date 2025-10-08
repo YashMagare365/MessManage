@@ -1,19 +1,57 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ORDER_STATUS,
   getNextStatusOptions,
   getStatusInfo,
   getOrderProgress,
 } from "../../lib/orderStatus";
+import GoogleMap from "../common/GoogleMap";
+import { getMessLocation } from "../../lib/firestore";
 
 export default function OrderCard({ order, onStatusUpdate }) {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [showMap, setShowMap] = useState(false);
+  const [messLocation, setMessLocation] = useState(null);
+  const [studentLocation, setStudentLocation] = useState(null);
+  const [loadingLocations, setLoadingLocations] = useState(false);
+
+  // Generate a stable order ID for display
+  const orderId = order.id || order._id || `temp-${Date.now()}`;
+  const displayOrderId = orderId.slice(-6);
 
   const statusInfo = getStatusInfo(order.status);
   const nextStatusOptions = getNextStatusOptions(order.status, order.orderType);
   const progress = getOrderProgress(order.status);
+
+  useEffect(() => {
+    if (order.orderType === "delivery" && order.deliveryAddress) {
+      loadLocations();
+    }
+  }, [order]);
+
+  const loadLocations = async () => {
+    if (!order.deliveryAddress) return;
+    
+    setLoadingLocations(true);
+    try {
+      // Get mess location
+      const messLoc = await getMessLocation(order.messId);
+      setMessLocation(messLoc);
+
+      // For demo purposes, create a mock student location
+      const mockStudentLocation = {
+        lat: messLoc.lat + (Math.random() - 0.5) * 0.02,
+        lng: messLoc.lng + (Math.random() - 0.5) * 0.02,
+        address: order.deliveryAddress
+      };
+      setStudentLocation(mockStudentLocation);
+    } catch (error) {
+      console.error("Error loading locations:", error);
+    } finally {
+      setLoadingLocations(false);
+    }
+  };
 
   // Format address function
   const formatAddress = (address) => {
@@ -37,7 +75,7 @@ export default function OrderCard({ order, onStatusUpdate }) {
   const handleStatusUpdate = async (newStatus) => {
     setUpdatingStatus(true);
     try {
-      await onStatusUpdate(order.id, newStatus);
+      await onStatusUpdate(orderId, newStatus);
     } catch (error) {
       console.error("Error updating status:", error);
       alert("Error updating order status: " + error.message);
@@ -80,16 +118,38 @@ export default function OrderCard({ order, onStatusUpdate }) {
     return `${Math.floor(diffHours / 24)}d ago`;
   };
 
+  // Prepare markers for the map
+  const markers = [];
+  if (messLocation) {
+    markers.push({
+      position: { lat: messLocation.lat, lng: messLocation.lng },
+      title: `${order.messName} (Mess)`,
+      icon: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
+    });
+  }
+  if (studentLocation) {
+    markers.push({
+      position: { lat: studentLocation.lat, lng: studentLocation.lng },
+      title: `${order.studentName} (Delivery Address)`,
+      icon: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'
+    });
+  }
+
+  // Calculate center point for map
+  const mapCenter = markers.length > 0 
+    ? markers[0].position 
+    : { lat: 28.6139, lng: 77.2090 }; // Default to Delhi
+
   return (
     <div className="bg-white rounded-lg shadow-sm border p-6">
       {/* Order Header */}
       <div className="flex justify-between items-start mb-4">
         <div>
           <h3 className="text-lg font-semibold text-gray-900">
-            Order #{order.id?.slice(-6) || "N/A"}
+            Order #{displayOrderId}
           </h3>
           <p className="text-sm text-gray-600">
-            by {order.studentName} • {formatDate(order.createdAt)} at{" "}
+            by {order.studentName || "Unknown Student"} • {formatDate(order.createdAt)} at{" "}
             {formatTime(order.createdAt)}
           </p>
           {getTimeElapsed(order.createdAt) && (
@@ -112,7 +172,7 @@ export default function OrderCard({ order, onStatusUpdate }) {
                 : "bg-green-100 text-green-800"
             }`}
           >
-            {order.orderType?.toUpperCase()}
+            {order.orderType?.toUpperCase() || "UNKNOWN"}
           </span>
         </div>
       </div>
@@ -204,7 +264,7 @@ export default function OrderCard({ order, onStatusUpdate }) {
         <div>
           <span className="text-gray-600">Total:</span>
           <span className="ml-2 font-semibold text-gray-900">
-            ₹{order.total}
+            ₹{order.total || 0}
           </span>
         </div>
       </div>
@@ -236,7 +296,7 @@ export default function OrderCard({ order, onStatusUpdate }) {
             <div className="flex space-x-4">
               <div>
                 <p className="text-xs text-gray-600">Name</p>
-                <p className="text-sm font-medium">{order.studentName}</p>
+                <p className="text-sm font-medium">{order.studentName || "Unknown"}</p>
               </div>
               {order.studentPhone && (
                 <div>
@@ -255,52 +315,108 @@ export default function OrderCard({ order, onStatusUpdate }) {
               </span>
               <button
                 onClick={() => setShowMap(!showMap)}
-                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                disabled={loadingLocations}
+                className="text-blue-600 hover:text-blue-800 text-sm font-medium disabled:opacity-50 flex items-center space-x-1"
               >
-                {showMap ? "Hide Map" : "Show Map"}
+                {loadingLocations ? (
+                  <>
+                    <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
+                    <span>Loading...</span>
+                  </>
+                ) : (
+                  <span>{showMap ? "Hide Map" : "Show Map"}</span>
+                )}
               </button>
             </div>
 
             {showMap ? (
               <div className="h-64 bg-gray-100 relative">
-                {/* Map Container - Will be replaced with actual map */}
-                <div className="absolute inset-0 bg-gradient-to-br from-blue-100 to-green-100 flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="text-4xl mb-2">🗺️</div>
-                    <p className="text-gray-600 font-medium">Interactive Map</p>
-                    <p className="text-sm text-gray-500 mt-1">
-                      Distance: ~2.5 km • Est. 15 mins
-                    </p>
-                    <div className="mt-3 flex space-x-2 justify-center">
-                      <button className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700">
-                        Get Directions
-                      </button>
-                      <button className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700">
-                        Call Customer
+                {markers.length > 0 ? (
+                  <>
+                    <GoogleMap
+                      center={mapCenter}
+                      markers={markers}
+                      height="256px"
+                      className="w-full"
+                    />
+                    <div className="absolute bottom-2 left-2 bg-white/90 backdrop-blur-sm rounded-lg p-2 shadow-sm">
+                      <div className="flex items-center space-x-4 text-xs">
+                        <div className="flex items-center space-x-1">
+                          <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                          <span className="text-gray-700">Mess Location</span>
+                        </div>
+                        <div className="flex items-center space-x-1">
+                          <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                          <span className="text-gray-700">Delivery Location</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="absolute top-2 right-2">
+                      <button
+                        onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${studentLocation?.lat},${studentLocation?.lng}&travelmode=driving`, '_blank')}
+                        className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 transition-colors flex items-center space-x-1"
+                      >
+                        <span>🗺️</span>
+                        <span>Get Directions</span>
                       </button>
                     </div>
+                  </>
+                ) : (
+                  <div className="absolute inset-0 bg-gradient-to-br from-blue-100 to-green-100 flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="text-4xl mb-2">🗺️</div>
+                      <p className="text-gray-600 font-medium">Interactive Map</p>
+                      <p className="text-sm text-gray-500 mt-1">
+                        {loadingLocations ? "Loading locations..." : "Click show map to view delivery route"}
+                      </p>
+                      {!loadingLocations && (
+                        <div className="mt-3 flex space-x-2 justify-center">
+                          <button 
+                            onClick={loadLocations}
+                            className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
+                          >
+                            Load Map
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-
-                {/* Map markers */}
-                <div className="absolute top-4 left-4 bg-red-500 text-white px-2 py-1 rounded text-xs font-medium">
-                  🏠 Mess
-                </div>
-                <div className="absolute bottom-4 right-4 bg-green-500 text-white px-2 py-1 rounded text-xs font-medium">
-                  🎯 Delivery
-                </div>
+                )}
               </div>
             ) : (
               <div className="h-32 bg-gray-100 flex items-center justify-center">
                 <button
                   onClick={() => setShowMap(true)}
-                  className="text-blue-600 hover:text-blue-800 font-medium"
+                  className="text-blue-600 hover:text-blue-800 font-medium flex items-center space-x-2"
                 >
-                  Click to view delivery map
+                  <span>🗺️</span>
+                  <span>Click to view delivery map</span>
                 </button>
               </div>
             )}
           </div>
+
+          {/* Delivery Actions */}
+          {order.status === "out_for_delivery" && studentLocation && (
+            <div className="mt-3 flex space-x-2">
+              <button
+                onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${studentLocation.lat},${studentLocation.lng}&travelmode=driving`, '_blank')}
+                className="flex-1 bg-green-600 text-white py-2 px-4 rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center justify-center space-x-2"
+              >
+                <span>🗺️</span>
+                <span>Open in Google Maps</span>
+              </button>
+              {order.studentPhone && (
+                <button
+                  onClick={() => window.open(`tel:${order.studentPhone}`)}
+                  className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2"
+                >
+                  <span>📞</span>
+                  <span>Call Customer</span>
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
